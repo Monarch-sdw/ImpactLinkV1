@@ -1,19 +1,42 @@
 # ImpactLink
 
-**Connecting Resources to Real Needs** · SDG 17 · Team De-zum · TS-036
+**Connecting Resources to Real Needs** · Community partnerships · Team De-zum · TS-036
 
 Methodist College of Engineering and Technology, Hyderabad. Shaik Muhammed Muzakir, Mohammed Muabbir Sayeed, and Devansh Bohra.
 
-This is an operational local hackathon MVP with Next.js App Router, TypeScript, Tailwind, a shadcn-style Radix button, Lucide, Recharts, React Hook Form/Zod, FastAPI, SQLAlchemy, and Alembic. It runs locally on SQLite because Docker/PostgreSQL are not installed on the development machine. A PostgreSQL Docker Compose setup is included but has not been executed here.
+This application is built with Next.js App Router, TypeScript, Tailwind, a shadcn-style Radix button, Lucide, Recharts, React Hook Form/Zod, FastAPI, SQLAlchemy, and Alembic. It runs locally on SQLite because Docker/PostgreSQL are not installed on the development machine. A PostgreSQL Docker Compose setup is included but has not been executed here.
 
 This copy lives in `ImpactLink/mvp` to isolate it from another implementation that appeared in the parent folder during development. Run commands from **this directory**. The parent's frontend, backend, and database are independent and should not be mixed with this copy.
 
 ## Quick start on Windows
 
+### Product update: 10 October 2026
+
+The UI now uses square edges, bold type, an ink/white/cobalt palette, consistent buttons, and minimal surfaces. Short hover, press, tab, and entrance transitions respect reduced-motion preferences. A single shared observer handles one-time reveals; there is no animation library or continuous decorative background. The theme lives in `frontend/src/app/product.css`.
+
+Projects use named community causes across registration, filters, matching, charts, and administration. Existing stored records remain compatible.
+
+NGO and CSR registrations require super-admin approval before their organizations, projects, or offers become public or eligible for matching. Applicants can prepare private resources, inspect review notes, and edit their profile. Profile changes return NGO/CSR accounts to review. College and supplier registrations are listed immediately. Resource verification remains a separate administrator workflow.
+
+Open **Login / Demo > Super admin** for the account-approval portal. The **NGO applicant (pending review)** and **CSR applicant (pending review)** accounts include private sample resources. Approve, reject, or remove a listing with a mandatory note; each decision is retained in the review history. Standard administrator accounts cannot make listing decisions.
+
+For hosting with persistent demo data, follow [DEPLOYMENT.md](DEPLOYMENT.md). The latest version is maintained in `Monarch-sdw/ImpactLinkV1` on branch `v2`.
+
+This copy can run alongside the original app using separate ports:
+
+```powershell
+cd C:\Users\moham\Downloads\dimpact\ImpactLink\mvp
+.\start-local.ps1 -FrontendPort 3018 -BackendPort 8018
+```
+
+Open **http://localhost:3018**; API docs are at **http://localhost:8018/docs**. Add `-Setup` if dependencies have not yet been installed. Stop this copy with `.\stop-local.ps1`. The stop script checks project paths so copied process records cannot stop the original app. Without port arguments, startup retains the default ports described below.
+
+To run browser tests against this copy, set `$env:TEST_URL='http://127.0.0.1:3018'` in `frontend/` before `npx playwright test`.
+
 Prerequisites: Python 3.12+, Node.js 20.9+ (Node 24 LTS was used), npm, and PowerShell. Restart the terminal after installing runtimes so PATH is refreshed.
 
 ```powershell
-cd C:\Users\moham\Downloads\ImpactLink\mvp
+cd C:\Users\moham\Downloads\dimpact\ImpactLink\mvp
 powershell -ExecutionPolicy Bypass -File .\start-local.ps1 -Setup
 ```
 
@@ -44,7 +67,7 @@ Copy-Item .env.example .env
 In a second terminal:
 
 ```powershell
-cd C:\Users\moham\Downloads\ImpactLink\mvp\frontend
+cd C:\Users\moham\Downloads\dimpact\ImpactLink\mvp\frontend
 npm ci
 $env:API_URL='http://127.0.0.1:8017'
 npm run dev -- --port 3017
@@ -68,7 +91,7 @@ Demo access requires `DEMO_MODE=true`. It is a local, trusted demonstration conv
 
 ## Implemented workflows
 
-- Public landing page, searchable project directory with SDG/resource/location/urgency/status filters, project detail pages and organization-scoped overview.
+- Public landing page, searchable project directory with cause/resource/location/urgency/status filters, project detail pages and organization-scoped overview.
 - Registration of NGO, CSR, college/group, and supplier organizations, password login/logout, session validation and fictional account switching.
 - NGO project creation with multiple validated requirements; title/description/progress edits; cancellation and completion controls. Completion requires delivery of all requested resources.
 - Contributor offer creation, editing, deactivation, available capacity and matching project discovery.
@@ -77,17 +100,17 @@ Demo access requires `DEMO_MODE=true`. It is a local, trusted demonstration conv
 - Platform analytics with two Recharts charts. Money and people are never summed together. Recommendations, commitments, delivery and verified outcomes are separate.
 - Administrator organization review with audit records, suspension from matching, and outcome attestation requiring an evidence reference.
 - OpenStreetMap location links based on stored coordinates.
-- Ninety fictional organization profiles (50 NGOs, 20 companies, 10 colleges/groups, 10 community suppliers), 100 anonymous fictional volunteer profiles, 30 projects and 14 resource offers. Volunteer profiles are sample records; capacity is managed through group offers.
+- Ninety-three fictional organization profiles (including two pending applicants and the super-admin workspace), 100 anonymous fictional volunteer profiles, 31 projects and 15 resource offers. Volunteer profiles are sample records; capacity is managed through group offers.
 
 ## Matching and allocation
 
-The engine in [matching.py](backend/app/matching.py) rejects inactive or exhausted offers, wrong categories or units, missing mandatory specification tags, insufficient date-window coverage, suspended organizations, and offers outside their radius. Missing coordinates exclude local offers instead of inventing a distance. Funding and explicitly remote offers are location-independent. Medical resources and healthcare-tagged volunteering require manual organization verification. Other pending organizations can match with reduced verification weight.
+The engine in [matching.py](backend/app/matching.py) rejects inactive or exhausted offers, wrong categories or units, missing mandatory specification tags, insufficient date-window coverage, suspended organizations, and offers outside their radius. Missing coordinates exclude local offers instead of inventing a distance. Funding and explicitly remote offers are location-independent. Medical resources and healthcare-tagged volunteering require manual organization verification. Only organizations with approved listings can match. Approved listings with pending resource verification can match ordinary resources with reduced verification weight.
 
 Eligible scores use:
 
 `100 × (0.35 compatibility + 0.20 capacity + 0.20 availability + 0.15 proximity + 0.10 verification)`
 
-- Compatibility: 1 for a supported project SDG; 0.7 for a compatible resource without the cause preference. Mandatory tags are exact, normalized matches, not fuzzy guesses.
+- Compatibility: 1 for a supported project cause; 0.7 for a compatible resource without the cause preference. Mandatory tags are exact, normalized matches, not fuzzy guesses.
 - Capacity: available capacity / remaining need, capped at 1.
 - Availability: 1 after full date-window eligibility.
 - Proximity: `1 − distance / service radius`, bounded at zero; 1 for remote/funding. Haversine distance uses stored coordinates.
@@ -99,9 +122,9 @@ Acceptance reruns eligibility inside a database transaction. PostgreSQL uses a t
 
 ## Data model and API
 
-Models are in [models.py](backend/app/models.py). The Alembic initial revision uses a frozen schema snapshot so future model edits do not change migration history. Tables: organizations, users, projects, requirements, offers, partnerships, commitments, project_updates, verification_records, recommendations, and volunteers. Foreign keys, uniqueness constraints, quantity checks, timestamps, and lookup indexes are included.
+Models are in [models.py](backend/app/models.py). The Alembic initial revision uses a frozen schema snapshot so future model edits do not change migration history. Tables: organizations, users, projects, requirements, offers, partnerships, commitments, project_updates, verification_records, listing_reviews, recommendations, and volunteers. Foreign keys, uniqueness constraints, quantity checks, timestamps, and lookup indexes are included.
 
-For MVP simplicity, a project has one primary SDG and small arrays of supported SDGs/skills are stored in JSON columns. The core operational entities are relational. Quantities use floating-point storage with bounded input; this is a pledge-tracking prototype, not financial accounting or payment processing.
+For MVP simplicity, a project has one primary cause and small arrays of supported causes/skills are stored in JSON columns. The core operational entities are relational. Quantities use floating-point storage with bounded input; this is a pledge-tracking prototype, not financial accounting or payment processing.
 
 Open [FastAPI documentation](http://localhost:8017/docs) for routes and validation schemas. Organization creation is atomic with registration. Offer deactivation and project cancellation serve as safe removal operations; historical commitments are retained. Organization updates reset verification. User-owned endpoints require matching organization IDs and roles. The frontend proxies `/api/*` to FastAPI so browser cookies stay same-origin.
 
@@ -115,55 +138,14 @@ Copy-Item .env.example .env
 docker compose up --build
 ```
 
-Open http://localhost:3000 and http://localhost:8000/docs. PostgreSQL data persists in a named volume. The backend applies Alembic migrations and seeds only an empty organization table. To use an existing PostgreSQL server, set the backend `DATABASE_URL` to `postgresql+psycopg://...` and apply migrations before startup. Use URL-safe database passwords in the Compose example, or URL-encode special characters in the connection URL.
+Open http://localhost:3000 and http://localhost:8000/docs. PostgreSQL data persists in a named volume. The backend applies Alembic migrations and seeds an empty database and adds missing approval-demo roles without resetting existing records. To use an existing PostgreSQL server, set the backend `DATABASE_URL` to `postgresql+psycopg://...` and apply migrations before startup. Use URL-safe database passwords in the Compose example, or URL-encode special characters in the connection URL.
 
-Docker and PostgreSQL integration are supplied but **not runtime-tested on this machine**. The SQLite transaction path is exercised by concurrency tests. For public deployment, disable demo access, use HTTPS with `COOKIE_SECURE=true`, configure trusted origins, provision an administrator through a controlled process, and add operational controls such as throttling and backups.
+Docker and PostgreSQL integration are supplied but **not runtime-tested on this machine**. The SQLite transaction path is exercised by concurrency tests. For a hosted fictional demo, follow [DEPLOYMENT.md](DEPLOYMENT.md). For real organization data, disable demo access and provision privileged users through a controlled process.
 
 ## Deploy to Vercel
 
-The root `vercel.json` deploys two services in one Vercel project: `frontend` serves the public application at `/`, and `backend` handles public API requests under `/api/*`. The browser calls the same-origin API path, so the frontend service does not call the backend service directly and no service binding is needed. The FastAPI middleware removes the `/api` prefix before matching its existing routes. Local Next.js development keeps its `API_URL` rewrite; Vercel uses the top-level service rewrites instead.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the complete environment table, automatic migration/demo setup, persistent PostgreSQL configuration, and hosted acceptance checks. Local SQLite files are excluded from Git and deployments. The hosting deployment is separate from publishing the source repository.
 
-1. Import `Monarch-sdw/ImpactLink` into Vercel with the **repository root** as the project root.
-2. Provision a managed PostgreSQL database. Vercel's function filesystem is not durable; do not use the default SQLite URL for a deployed application.
-3. Set these project environment variables in Vercel:
-   - `DATABASE_URL`: the provider's connection URL in SQLAlchemy format, `postgresql+psycopg://...`.
-   - `JWT_SECRET`: a stable, randomly generated secret of at least 32 characters. The backend refuses to start on Vercel if this is missing.
-   - `COOKIE_SECURE=true`: require HTTPS for session cookies.
-   - `CORS_ORIGINS`: comma-separated allowed origins, including the production custom domain (for example, `https://impactlink.example`). Vercel preview deployment origins are also allowed automatically.
-   - `DEMO_MODE=true` only for a fictional public showcase; use `false` when demo-account access is not appropriate.
-4. Before first use, run Alembic migrations and, for a demo deployment, seed the database once using the **same** `DATABASE_URL` configured in Vercel. From `backend/`, with the backend dependencies installed and the database URL set:
+## Run checks
 
-   ```powershell
-   python -m alembic upgrade head
-   python -m app.seed
-   ```
-
-   For a non-demo deployment, run the migration but skip the seed command. Migrations and seeding are not run automatically by Vercel Functions.
-5. Deploy from Vercel or use `vercel dev` from the repository root to test the services and shared routing locally. On Windows, ensure a `python3` executable is on `PATH`; the Vercel Python service runner invokes `python3` directly.
-
-Vercel routes `/api/*` to the backend and all other paths to the frontend. The `/api` prefix is preserved by the service router and normalized by FastAPI middleware. No internal binding is configured because API requests enter through the public same-origin rewrite rather than a server-to-server call.
-
-## Tests and checks
-
-```powershell
-cd backend
-..\.venv\Scripts\python.exe -m pytest -q
-cd ..\frontend
-npm run build
-npm run typecheck
-npx playwright test
-```
-
-Browser tests expect the local app on port 3017 and use installed Google Chrome. Set `TEST_URL` to override the URL. They create clearly named browser-test projects and small funding commitments in the local demo database; they do not reset or erase existing records. Backend tests each use a separate temporary SQLite database.
-
-Backend tests cover creation, exact/partial/multi-partner matching, no matches, conflicting dates, inactive/wrong-unit/wrong-skill/distant offers, missing coordinates, concurrent overbooking, acceptance, decline, delivery bounds, ownership, registration/login, stale capacity, cancellation, funding/volunteer metrics and the AI-disabled path. Browser tests cover the judge journey and mobile navigation/filtering. See [VALIDATION.md](VALIDATION.md) for actual results from this build.
-
-## Deliberate prototype limits
-
-- No external LLM or embedding service is connected. Manual structured entry and deterministic matching are fully operational. There is no API-key field that pretends otherwise; natural-language extraction remains optional future work.
-- No payment gateway, emails, real-world identity validation, beneficiary PII, or external donation verification. Delivery and evidence are recorded by authorized users, not independently proven by integrations.
-- Maps open OpenStreetMap; an embedded Leaflet map is not included.
-- Requirements are immutable after project creation to protect linked requests. Create a new project for materially different quantities or dates. Existing requests cannot be renegotiated or resent against the same offer/requirement pair; create an updated offer if needed.
-- Capacity represents a finite offered pool, not a recurring calendar inventory. Delivered capacity stays consumed. Greedy allocation is deterministic, not a global optimization across projects.
-- Suggested-match statistics count saved unique recommendation pairs, including historical ones; they are never reported as partnerships. Beneficiary verification means a stored manual attestation, and demo attestations remain fictional.
-- No production-scale pagination, volunteer-level scheduling, or automated document-verification workflow.
+From `backend/`, run `..\.venv\Scripts\python.exe -m pytest -q`. From `frontend/`, run `npm run build`, `npm run typecheck`, and `$env:TEST_URL='http://127.0.0.1:3018'; npx playwright test` with the app running. The Playwright configuration uses installed Chrome. See [VALIDATION.md](VALIDATION.md) for results and limitations.

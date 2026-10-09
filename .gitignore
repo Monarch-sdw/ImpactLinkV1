@@ -1,6 +1,8 @@
 .venv/
 node_modules/
 .next/
+.next-dev/
+.tmp/
 __pycache__/
 .pytest_cache/
 *.db
@@ -8,6 +10,9 @@ __pycache__/
 *.db-wal
 *.tsbuildinfo
 .env
+.env.*
+!.env.example
+.vercel/
 *.log
 test-results/
 playwright-report/

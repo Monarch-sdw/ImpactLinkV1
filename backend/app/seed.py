@@ -1,20 +1,46 @@
 from datetime import date, timedelta
 import secrets
+import os
 from pwdlib import PasswordHash
 from sqlalchemy import select
 from .db import SessionLocal
 from .models import Organization, User, Project, Requirement, Offer, Volunteer
 
+def ensure_review_demo(db):
+    """Add missing demo roles without resetting decisions or existing records."""
+    fixtures=[
+        ('superadmin@impactlink.example','Super admin','super_admin','ImpactLink Operations','supplier','approved'),
+        ('ngo-review@impactlink.example','NGO applicant (pending review)','ngo','New Horizons Foundation','ngo','pending'),
+        ('csr-review@impactlink.example','CSR applicant (pending review)','contributor','Northstar CSR Fund','company','pending'),
+    ]
+    for email,label,role,name,kind,status in fixtures:
+        if db.scalar(select(User.id).where(User.email==email)): continue
+        org=Organization(name=name+' · Demo',organization_type=kind,location='Hyderabad',contact=email,description='Fictional application for the account approval demo.',supported_causes=[4,3],is_demo=True,listing_status=status,verification_status='pending')
+        db.add(org);db.flush()
+        db.add(User(name=label,email=email,password_hash=PasswordHash.recommended().hash(secrets.token_urlsafe(24)),role=role,organization_id=org.id))
+        start=date.today()+timedelta(days=7);end=start+timedelta(days=28)
+        if role=='ngo':
+            project=Project(organizer_id=org.id,title='Learning access for every child',description='A fictional learning programme awaiting organization approval before it can be publicly listed.',location='Hyderabad',cause_id=4,urgency='Medium',start_date=start,end_date=end,expected_beneficiaries=80,is_demo=True)
+            db.add(project);db.flush()
+            db.add(Requirement(project_id=project.id,resource_type='Funding',quantity=15000,unit='INR',specifications=[],required_start=start,required_end=end,notes='Community classroom supplies.'))
+        elif kind=='company':
+            db.add(Offer(organization_id=org.id,resource_type='Funding',total_capacity=50000,unit='INR',specifications=[],available_start=date.today(),available_end=end+timedelta(days=30),location='Hyderabad',remote=True,conditions='Fictional CSR pledge; no payment is processed.'))
+    db.commit()
+
 def seed(db):
+    if os.getenv('DEMO_MODE','false').lower()!='true':
+        print('Demo seeding disabled. Set DEMO_MODE=true for a fictional showcase.');return
     if db.scalar(select(Organization.id).limit(1)):
-        print('Database already contains organizations; seed skipped.'); return
+        ensure_review_demo(db)
+        print('Existing records preserved; missing demo roles added.'); return
     start=date.today()+timedelta(days=7); end=start+timedelta(days=28)
     names=['Udaan Learning Collective','Sahara Relief Network','Haritha Community Trust','Aarogya Outreach Foundation']
     orgs=[]
     for i in range(90):
         kind='ngo' if i<50 else 'company' if i<70 else 'college' if i<80 else 'supplier'
         name=names[i] if i<4 else f'{["Pragati","Sankalp","Navya","Srujana","Setu"][i%5]} {kind.title()} {i+1:02}'
-        org=Organization(name=f'{name} · Demo',organization_type=kind,description='Fictional demonstration organization for ImpactLink. No real-world verification or partnership is implied.',location=['Hyderabad','Secunderabad','Gachibowli'][i%3],latitude=17.385+(i%5)*.015,longitude=78.486+(i%4)*.012,verification_status='verified' if i%7 else 'pending',supported_sdgs=[3,4,11,13,17],is_demo=True)
+        org=Organization(name=f'{name} · Demo',organization_type=kind,description='Fictional demonstration organization for ImpactLink. No real-world verification or partnership is implied.',location=['Hyderabad','Secunderabad','Gachibowli'][i%3],latitude=17.385+(i%5)*.015,longitude=78.486+(i%4)*.012,verification_status='verified' if i%7 else 'pending',supported_causes=[3,4,11,13,17],is_demo=True)
+        org.listing_status='approved'
         db.add(org); orgs.append(org)
     db.flush()
     # Shared contributor offers let judges demonstrate several resource types with one account.
@@ -26,8 +52,8 @@ def seed(db):
       ('A greener neighbourhood',13,'Medium',250,[('Other',200,'saplings',['sapling']),('Volunteers',25,'people',[]),('Transportation',2,'trips',[]),('Venue or facilities',1,'sites',['planting'])]),
       ('Community health, closer to home',3,'High',150,[('Volunteers',8,'people',['healthcare']),('Medical resources',6,'kits',['diagnostic']),('Venue or facilities',1,'days',[]),('Funding',20000,'INR',[])])]
     for i in range(30):
-        title,sdg,urgency,beneficiaries,needs=scenarios[i%4]
-        p=Project(organizer_id=orgs[0 if i<4 else i%50].id,title=title if i<4 else f'{title} — community {i+1}',description=['A four-week digital literacy programme connecting young learners with volunteer tutors, working laptops, and practical skills. Help us build an accessible learning space in Hyderabad.','Coordinate food kits, local volunteers, and transport for families affected by flooding. Each commitment is tracked separately from actual delivery.','Bring neighbours together to plant native trees and create a shared green space. We need saplings, volunteers, transport, and a suitable planting site.','A community health camp providing basic screening and health education. Qualified healthcare volunteers and diagnostic resources require organization verification.'][i%4],location='Hyderabad',latitude=17.385,longitude=78.486,sdg=sdg,urgency=urgency,start_date=start,end_date=end,expected_beneficiaries=beneficiaries,is_demo=True)
+        title,cause_id,urgency,beneficiaries,needs=scenarios[i%4]
+        p=Project(organizer_id=orgs[0 if i<4 else i%50].id,title=title if i<4 else f'{title} — community {i+1}',description=['A four-week digital literacy programme connecting young learners with volunteer tutors, working laptops, and practical skills. Help us build an accessible learning space in Hyderabad.','Coordinate food kits, local volunteers, and transport for families affected by flooding. Each commitment is tracked separately from actual delivery.','Bring neighbours together to plant native trees and create a shared green space. We need saplings, volunteers, transport, and a suitable planting site.','A community health camp providing basic screening and health education. Qualified healthcare volunteers and diagnostic resources require organization verification.'][i%4],location='Hyderabad',latitude=17.385,longitude=78.486,cause_id=cause_id,urgency=urgency,start_date=start,end_date=end,expected_beneficiaries=beneficiaries,is_demo=True)
         db.add(p); db.flush()
         for category,qty,unit,spec in needs: db.add(Requirement(project_id=p.id,resource_type=category,quantity=qty,unit=unit,specifications=spec,required_start=start,required_end=end))
     offers=[(50,'Funding',65000,'INR',[]),(51,'Funding',50000,'INR',[]),(50,'Equipment',15,'laptops',['laptop']),(70,'Volunteers',15,'people',['tutoring']),(71,'Volunteers',20,'people',['tutoring']),(72,'Volunteers',10,'people',[]),(80,'Food and supplies',300,'kits',['food']),(81,'Food and supplies',200,'kits',['food']),(80,'Transportation',2,'trips',[]),(82,'Other',200,'saplings',['sapling']),(80,'Venue or facilities',1,'sites',['planting']),(50,'Medical resources',4,'kits',['diagnostic']),(70,'Volunteers',5,'people',['healthcare']),(80,'Venue or facilities',1,'days',[])]
@@ -39,7 +65,8 @@ def seed(db):
     for idx,category,qty,unit,spec in offers:
         db.add(Offer(organization_id=orgs[idx].id,resource_type=category,total_capacity=qty,unit=unit,specifications=spec,available_start=start-timedelta(days=5),available_end=end+timedelta(days=20),location='Hyderabad',latitude=orgs[idx].latitude,longitude=orgs[idx].longitude,service_radius=60,remote=category=='Funding',conditions='Please coordinate scheduling before delivery. Fictional demo offer.'))
     for i in range(100): db.add(Volunteer(organization_id=orgs[70+i%10].id,display_name=f'Demo volunteer {i+1:03}',skills=['tutoring'] if i%2 else ['community support']))
-    db.commit(); print('Seeded 90 fictional organizations, 100 volunteers, 30 projects and 14 offers.')
+    db.commit();ensure_review_demo(db)
+    print('Seeded fictional organizations, projects, offers, and super-admin approval demos.')
 
 if __name__=='__main__':
     with SessionLocal() as db: seed(db)

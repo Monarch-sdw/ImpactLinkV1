@@ -16,7 +16,10 @@ class Organization(Base):
     longitude = Column(Float)
     contact = Column(String(200), default='')
     verification_status = Column(String(20), default='pending')
-    supported_sdgs = Column(JSON, default=list)
+    listing_status = Column(String(20), nullable=False, default='pending', index=True)
+    listing_note = Column(Text, nullable=False, default='')
+    # Preserve existing database columns while exposing meaningful cause names in the app.
+    supported_causes = Column('supported_sdgs', JSON, default=list)
     is_demo = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=now)
 
@@ -39,7 +42,7 @@ class Project(Base):
     location = Column(String(150), nullable=False)
     latitude = Column(Float)
     longitude = Column(Float)
-    sdg = Column(Integer, nullable=False)
+    cause_id = Column('sdg', Integer, nullable=False)
     urgency = Column(String(20), default='Medium')
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=False)
@@ -129,6 +132,16 @@ class Recommendation(Base):
     offer_id = Column(ForeignKey('offers.id'), nullable=False)
     score = Column(Float, nullable=False)
     __table_args__ = (UniqueConstraint('requirement_id', 'offer_id'),)
+
+class ListingReview(Base):
+    __tablename__ = 'listing_reviews'
+    id = Column(Integer, primary_key=True)
+    organization_id = Column(ForeignKey('organizations.id'), nullable=False, index=True)
+    reviewer_id = Column(ForeignKey('users.id'), nullable=False)
+    previous_status = Column(String(20), nullable=False)
+    status = Column(String(20), nullable=False)
+    note = Column(Text, nullable=False)
+    reviewed_at = Column(DateTime(timezone=True), default=now, nullable=False)
 
 class Volunteer(Base):
     __tablename__ = 'volunteers'

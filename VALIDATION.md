@@ -1,47 +1,38 @@
-# Validation results
+# Validation - 10 October 2026
 
-Executed locally on Windows on 9 October 2026 against the isolated `ImpactLink/mvp` implementation.
+Tested in the dimpact/ImpactLink/mvp repository. Local app: http://localhost:3018. API: http://localhost:8018. The separate original app was not stopped or changed.
 
 | Check | Result |
 | --- | --- |
-| Backend `python -m pytest -q` | **15 passed**, 3.81 seconds on final run |
-| Frontend `npm run build` | **Passed**, Next.js 15.5.27; production compilation and TypeScript validation succeeded |
-| Browser `npx playwright test` | **4 passed**, 22.2 seconds on final run, installed Chrome, one worker |
-| `npm audit --audit-level=moderate` | **0 vulnerabilities** reported |
-| Editor diagnostics | **No errors found** in the MVP folder |
-| SQLite Alembic upgrade and seed | **Passed**, clean database created and seeded; subsequent startup correctly skipped re-seeding |
-| Backend health and frontend HTTP | **Passed**, API healthy with demo enabled and AI disabled; frontend returned HTTP 200 |
-| Desktop visual inspection | **Passed**, project directory checked at 1440 × 1000 |
-| Mobile visual inspection | **Passed**, project directory checked at 390 × 844; no horizontal overflow in browser test |
-| PostgreSQL / Docker Compose | **Not executed**; Docker and PostgreSQL were unavailable on this machine |
+| Backend pytest | 25 passed |
+| Next.js production build | Passed, Next.js 15.5.27 |
+| Standalone TypeScript check | Passed |
+| Chrome Playwright | 8 passed |
+| Fresh migration and repeatable demo setup | Passed on SQLite |
+| Demo-disabled setup | Schema created without demo accounts |
+| Git diff whitespace | Passed |
+| Tracked secrets and databases | None |
 
-## Backend coverage
+## Approval coverage
 
-- Valid project and resource-offer creation; invalid quantities rejected.
-- Calculated score of 95 for a 15-of-20 offer with full eligibility and other components equal to one.
-- Partial coverage, multi-contributor coverage, empty matching results, and cross-requirement capacity accounting.
-- Wrong units, missing skills, date conflicts, inactive offers, missing coordinates and service-radius exclusions.
-- Explicit acceptance, no reservation on proposal/request, and separate confirmed/delivered totals.
-- Two concurrent acceptance attempts against one capacity pool: exactly one succeeded and the other returned HTTP 409.
-- Delivery upper bounds and monotonic cumulative quantities.
-- Ownership and role checks, duplicate-request rejection, declining, stale-capacity rejection and suspension filtering.
-- Cancellation preserves deliveries, releases undelivered commitments, and removes cancelled requirements from unmet-resource metrics.
-- Password registration/login/logout and exclusion of real registered accounts from demo login.
-- Funding and volunteer units remain separate; estimated beneficiaries never enter verified-outcome totals.
-- A suspended organization cannot clear its own suspension by editing its profile. NGO users cannot replace administrator-reviewed outcome evidence.
-- AI-disabled health status and operational manual structured entry.
+Backend tests cover NGO/CSR pending registration, private organization/project/offer visibility, public dashboard filtering, owner access, super-admin-only decisions, required notes, review history, duplicate/concurrent decisions, profile changes returning to review, and prevention of client-supplied privileges. Rejection blocks stale request acceptance as well as new matching.
 
-## Browser coverage
+Desktop NGO and mobile CSR browser journeys cover registration, private resources, super-admin approval, reload persistence, removal of approval, and applicant sign-in to read the decision. Both seeded pending applicants remain available for manual review.
 
-1. **Judge journey:** NGO demo login → create a funding project → calculate matches → request → switch to the matching contributor → accept → record partial delivery → reload and verify persistence → open impact analytics. No uncaught browser runtime errors were observed in this journey.
-2. **Mobile:** open navigation at 390px → navigate to impact dashboard → search projects → verify results and no horizontal overflow.
-3. **Contributor:** create an offer → edit its capacity → deactivate → verify persisted inactive status.
-4. **NGO and administrator:** create a project with two distinct resource requirements → verify both rows → switch to administrator → change an organization's review status → restore its initial status.
+The other browser journeys cover named causes, keyboard tabs, reduced motion, matching, request/acceptance, delivery, offer editing/deactivation, multi-requirement project creation, verification, and mobile navigation. Backend tests also retain capacity concurrency, ownership, cancellation, delivery limits, and separate funding/volunteer metrics.
 
-Browser tests intentionally leave explicitly labelled `Browser journey`, `Browser multiple needs`, and `browser-offer-*` records in the fictional local dataset. Thus current project counts exceed the original 30 seeded projects; dashboard numbers are still computed from records. Tests do not erase existing demo work.
+## Visual and data checks
 
-One backend test-library deprecation warning is emitted by Starlette's AnyIO compatibility alias. Playwright also prints a terminal colour-environment warning. Neither caused test failure.
+Desktop and mobile approval screens were inspected: square surfaces/buttons, bold type, ink/white/cobalt colors, and no horizontal page overflow. Screenshots are in ignored .runtime/product-*.png. Motion uses one shared visibility observer and short transitions, with reduced-motion support.
 
-## Reproduction and limits
+The existing local database was backed up to .runtime/before-listing-approval.db before migration. Existing records were retained. Fresh setup creates 93 organizations, 31 projects, 15 offers, and the super-admin/applicant demo roles. A second bootstrap preserves counts, listing decisions, and edits. Vercel startup rejects SQLite.
 
-Use the commands in [README.md](README.md). The local app runs at [localhost:3017](http://localhost:3017), with [OpenAPI documentation](http://localhost:8017/docs). Local records are persisted in SQLite. The PostgreSQL transaction path and Docker startup are supplied but were not claimed as tested. No external LLM, payment processor, or real-world verification integration is connected.
+Browser tests leave labelled fictional projects, offers, and rejected test applications in this local database. Startup never resets existing demo activity.
+
+## Git and deployment
+
+Release branch: v2. Repository: Monarch-sdw/ImpactLinkV1. This release was prepared from ea61ecc92c487e96940fb0caeca930e3f4a0e853 in the original ImpactLink repository. Publishing the source is authorized; hosting deployment remains separate.
+
+Vercel configuration was checked against current official Services/FastAPI documentation and the live schema's Services support. [DEPLOYMENT.md](DEPLOYMENT.md) documents persistent PostgreSQL, build-time migrations/seeding, and required environment variables.
+
+A real PostgreSQL database, Docker runtime, and live Vercel deployment were not exercised. Browser checks used Chrome. Starlette/AnyIO emits one test-only deprecation warning.

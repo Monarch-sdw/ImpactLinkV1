@@ -13,9 +13,12 @@ from .db import get_db
 from .models import Organization, User, Project, Requirement, Offer, Partnership, Commitment, ProjectUpdate, Verification, Recommendation, now
 from .schemas import Register, Login, OrgIn, OrgOut, ProjectIn, ProjectPatch, OfferIn, OfferOut, RequestIn, DeliveryIn, VerifyIn
 from .matching import committed, delivered, rank, plan
+from .causes import cause_name
+from .models import ListingReview
+from .schemas import ListingReviewIn
 from .schemas import UserOut, ProjectOut, RequirementOut, PartnershipOut, MatchOut, PlanRow
 
-app = FastAPI(title='ImpactLink API', version='1.0.0', description='Resource coordination prototype. Demo data is fictional. Funding records are pledges, not payments.', docs_url=None)
+app = FastAPI(title='ImpactLink API', version='1.0.0', description='Community resource coordination. Demo data is fictional. Funding records are pledges, not payments.', docs_url=None)
 origins = os.getenv('CORS_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').split(',')
 vercel_url = os.getenv('VERCEL_URL')
 if vercel_url:
@@ -27,6 +30,8 @@ if not SECRET:
         raise RuntimeError('JWT_SECRET must be configured in the Vercel project environment.')
     SECRET = secrets.token_urlsafe(48)
 DEMO = os.getenv('DEMO_MODE', 'false').lower() == 'true'
+if os.getenv('VERCEL') and len(SECRET) < 32:
+    raise RuntimeError('JWT_SECRET must contain at least 32 characters on Vercel.')
 passwords = PasswordHash.recommended()
 
 @app.middleware('http')
@@ -63,14 +68,32 @@ def owner(user, organization_id, role=None):
     if user.organization_id != organization_id or (role and user.role != role): fail(403, 'This action belongs to another organization or role.')
 
 def admin(user):
-    if user.role != 'admin': fail(403, 'Administrator access required.')
+    if user.role not in ('admin', 'super_admin'): fail(403, 'Administrator access required.')
+
+def super_admin(user):
+    if user.role != 'super_admin': fail(403, 'Super administrator access required.')
+
+def optional_user(request, db):
+    if not request or not request.cookies.get('impactlink_session'): return None
+    try: return current(request, db)
+    except HTTPException: return None
+
+def public_org_ids(db):
+    return select(Organization.id).where(Organization.listing_status=='approved', Organization.verification_status!='rejected')
+
+def visible_organization(db, organization_id, request):
+    org=record(db,Organization,organization_id)
+    if org.listing_status=='approved' and org.verification_status!='rejected': return org
+    user=optional_user(request,db)
+    if user and (user.organization_id==org.id or user.role in ('admin','super_admin')): return org
+    fail(404, 'Organization is not publicly listed.')
 
 def user_info(db, user):
     return {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role, 'organization': OrgOut.model_validate(db.get(Organization, user.organization_id)).model_dump()}
 
 def login_response(db, user, response):
     token = jwt.encode({'sub': str(user.id), 'exp': datetime.now(timezone.utc) + timedelta(hours=8)}, SECRET, algorithm='HS256')
-    response.set_cookie('impactlink_session', token, httponly=True, samesite='lax', secure=os.getenv('COOKIE_SECURE','false') == 'true', max_age=28800, path='/')
+    response.set_cookie('impactlink_session', token, httponly=True, samesite='lax', secure=os.getenv('COOKIE_SECURE','true' if os.getenv('VERCEL') else 'false').lower() == 'true', max_age=28800, path='/')
     return user_info(db, user)
 
 def write_lock(db):
@@ -90,6 +113,7 @@ def health(): return {'status': 'ok', 'demo_mode': DEMO, 'ai_enabled': False}
 def register(data: Register, response: Response, db=Depends(get_db)):
     if (data.role == 'ngo') != (data.organization.organization_type == 'ngo'): fail(422, 'Organization type must match the account role.')
     org = Organization(**data.organization.model_dump())
+    org.listing_status = 'pending' if org.organization_type in ('ngo','company') else 'approved'
     db.add(org); db.flush()
     user = User(name=data.name, email=data.email.lower(), password_hash=passwords.hash(data.password), role=data.role, organization_id=org.id)
     db.add(user)
@@ -124,17 +148,21 @@ def logout(response: Response):
     response.delete_cookie('impactlink_session', path='/'); return {'message': 'Signed out.'}
 
 @app.get('/organizations', response_model=list[OrgOut])
-def organizations(db=Depends(get_db)): return list(db.scalars(select(Organization).order_by(Organization.id)))
+def organizations(db=Depends(get_db)): return list(db.scalars(select(Organization).where(Organization.id.in_(public_org_ids(db))).order_by(Organization.id)))
 
 @app.get('/organizations/{id}', response_model=OrgOut)
-def organization(id:int, db=Depends(get_db)): return record(db,Organization,id)
+def organization(id:int, request:Request, db=Depends(get_db)): return visible_organization(db,id,request)
 
 @app.put('/organizations/{id}', response_model=OrgOut)
 def update_org(id:int, data:OrgIn, user=Depends(current), db=Depends(get_db)):
     owner(user,id); write_lock(db)
     org=record(db,Organization,id)
     if data.organization_type != org.organization_type: fail(409,'Organization type cannot be changed.')
+    changed=any(getattr(org,key)!=value for key,value in data.model_dump().items())
     for key,value in data.model_dump().items(): setattr(org,key,value)
+    if changed and org.organization_type in ('ngo','company'):
+        org.listing_status='pending'
+        org.listing_note='Profile updated. Awaiting a new listing review.'
     if org.verification_status != 'rejected': org.verification_status='pending'
     db.commit(); return org
 
@@ -144,18 +172,19 @@ def project_data(db,p):
         c,d=committed(db,requirement_id=r.id),delivered(db,r.id)
         reqs.append({**jsonable_encoder(r), 'committed':c,'delivered':d,'remaining':max(0,r.quantity-c)})
     progress = round(sum(min(1,r['committed']/r['quantity']) for r in reqs)/len(reqs)*100) if reqs else 0
-    return {**jsonable_encoder(p), 'organization_name':db.get(Organization,p.organizer_id).name,'requirements':reqs,'progress':progress}
+    return {**jsonable_encoder(p), 'organization_name':db.get(Organization,p.organizer_id).name,'listing_status':db.get(Organization,p.organizer_id).listing_status,'requirements':reqs,'progress':progress}
 
 @app.get('/projects', response_model=list[ProjectOut])
-def projects(search:str='', sdg:int|None=None, resource_type:str='', location:str='', urgency:str='', status:str='', mine:bool=False, request:Request=None, db=Depends(get_db)):
+def projects(search:str='', cause_id:int|None=None, resource_type:str='', location:str='', urgency:str='', status:str='', mine:bool=False, request:Request=None, db=Depends(get_db)):
     q=select(Project).order_by(Project.id)
     if search: q=q.where(Project.title.ilike(f'%{search}%'))
-    if sdg: q=q.where(Project.sdg==sdg)
+    if cause_id: q=q.where(Project.cause_id==cause_id)
     if location: q=q.where(Project.location.ilike(f'%{location}%'))
     if urgency: q=q.where(Project.urgency==urgency)
     if status: q=q.where(Project.status==status)
     if resource_type: q=q.where(Project.id.in_(select(Requirement.project_id).where(Requirement.resource_type==resource_type)))
     if mine: q=q.where(Project.organizer_id==current(request,db).organization_id)
+    else: q=q.where(Project.organizer_id.in_(public_org_ids(db)))
     return [project_data(db,p) for p in db.scalars(q)]
 
 @app.post('/projects', status_code=201, response_model=ProjectOut)
@@ -168,10 +197,12 @@ def create_project(data:ProjectIn,user=Depends(current),db=Depends(get_db)):
     db.commit(); return project_data(db,p)
 
 @app.get('/projects/{id}', response_model=ProjectOut)
-def project(id:int,db=Depends(get_db)): return project_data(db,record(db,Project,id))
+def project(id:int,request:Request,db=Depends(get_db)):
+    p=record(db,Project,id);visible_organization(db,p.organizer_id,request);return project_data(db,p)
 
 @app.get('/projects/{id}/requirements', response_model=list[RequirementOut])
-def requirements(id:int,db=Depends(get_db)): return project_data(db,record(db,Project,id))['requirements']
+def requirements(id:int,request:Request,db=Depends(get_db)):
+    p=record(db,Project,id);visible_organization(db,p.organizer_id,request);return project_data(db,p)['requirements']
 
 @app.patch('/projects/{id}')
 def edit_project(id:int,data:ProjectPatch,user=Depends(current),db=Depends(get_db)):
@@ -193,8 +224,8 @@ def edit_project(id:int,data:ProjectPatch,user=Depends(current),db=Depends(get_d
     db.commit(); return project_data(db,p)
 
 @app.get('/projects/{id}/updates')
-def updates(id:int,db=Depends(get_db)):
-    record(db,Project,id)
+def updates(id:int,request:Request,db=Depends(get_db)):
+    p=record(db,Project,id);visible_organization(db,p.organizer_id,request)
     return list(db.scalars(select(ProjectUpdate).where(ProjectUpdate.project_id==id).order_by(ProjectUpdate.id.desc())))
 
 def offer_data(db,o):
@@ -204,6 +235,7 @@ def offer_data(db,o):
 def offers(mine:bool=False,resource_type:str='',request:Request=None,db=Depends(get_db)):
     q=select(Offer).order_by(Offer.id)
     if mine: q=q.where(Offer.organization_id==current(request,db).organization_id)
+    else: q=q.where(Offer.organization_id.in_(public_org_ids(db)))
     if resource_type: q=q.where(Offer.resource_type==resource_type)
     return [offer_data(db,o) for o in db.scalars(q)]
 
@@ -226,11 +258,12 @@ def deactivate(id:int,user=Depends(current),db=Depends(get_db)):
     write_lock(db); o=record(db,Offer,id); owner(user,o.organization_id,'contributor'); o.status='inactive'; db.commit(); return {'message':'Offer deactivated; existing commitments are preserved.'}
 
 @app.get('/requirements/{id}/matches', response_model=list[MatchOut])
-def matches(id:int,db=Depends(get_db)):
-    r=record(db,Requirement,id); return rank(db,db.get(Project,r.project_id),r)
+def matches(id:int,request:Request,db=Depends(get_db)):
+    r=record(db,Requirement,id);p=record(db,Project,r.project_id);visible_organization(db,p.organizer_id,request);return rank(db,p,r)
 
 @app.get('/projects/{id}/plan', response_model=list[PlanRow])
-def preview_plan(id:int,db=Depends(get_db)): return plan(db,record(db,Project,id))
+def preview_plan(id:int,request:Request,db=Depends(get_db)):
+    p=record(db,Project,id);visible_organization(db,p.organizer_id,request);return plan(db,p)
 
 @app.post('/projects/{id}/plan', response_model=list[PlanRow])
 def generate_plan(id:int,user=Depends(current),db=Depends(get_db)):
@@ -254,7 +287,7 @@ def partnerships(project_id:int|None=None,user=Depends(current),db=Depends(get_d
     q=select(Partnership).order_by(Partnership.id.desc())
     if project_id: q=q.where(Partnership.project_id==project_id)
     rows=[partnership_data(db,p) for p in db.scalars(q)]
-    return [p for p in rows if user.role=='admin' or user.organization_id in (p['organizer_id'],p['organization_id'])]
+    return [p for p in rows if user.role in ('admin','super_admin') or user.organization_id in (p['organizer_id'],p['organization_id'])]
 
 @app.post('/partnerships',status_code=201)
 def request_partnership(data:RequestIn,user=Depends(current),db=Depends(get_db)):
@@ -291,24 +324,48 @@ def delivery(id:int,data:DeliveryIn,user=Depends(current),db=Depends(get_db)):
 @app.get('/dashboard')
 def dashboard(mine:bool=False,request:Request=None,db=Depends(get_db)):
     user=current(request,db) if mine else None
+    listed=set(db.scalars(public_org_ids(db)))
     ps=list(db.scalars(select(Project)))
+    if not (user and user.role=='ngo'): ps=[p for p in ps if p.organizer_id in listed]
     if user and user.role=='ngo': ps=[p for p in ps if p.organizer_id==user.organization_id]
     links=[partnership_data(db,p) for p in db.scalars(select(Partnership))]
     if user: links=[p for p in links if user.organization_id in (p['organizer_id'],p['organization_id'])]
+    else: links=[p for p in links if p['organizer_id'] in listed and p['organization_id'] in listed]
     def total(resource,key): return sum(p['commitment'][key] for p in links if p['resource_type']==resource and p['commitment'])
     reqs=[r for p in ps if p.status=='active' for r in project_data(db,p)['requirements']]
     unmet={}
     for r in reqs:
         key=f"{r['resource_type']} ({r['unit']})"
         unmet[key]=unmet.get(key,0)+r['remaining']
-    sdgs={}
-    for p in ps: sdgs[f'SDG {p.sdg}']=sdgs.get(f'SDG {p.sdg}',0)+1
-    recommendations=db.scalar(select(func.count()).select_from(Recommendation))
-    return {'organizations':db.scalar(select(func.count()).select_from(Organization)),'active_projects':sum(p.status=='active' for p in ps),'completed_projects':sum(p.status=='completed' for p in ps),'suggested_partnerships':recommendations,'accepted_partnerships':sum(p['status']=='accepted' for p in links),'pending_requests':sum(p['status']=='pending' for p in links),'funding_committed':total('Funding','confirmed_quantity'),'funding_delivered':total('Funding','delivered_quantity'),'volunteers_committed':total('Volunteers','confirmed_quantity'),'volunteers_deployed':total('Volunteers','delivered_quantity'),'verified_beneficiaries':sum(p.verified_beneficiaries for p in ps),'unmet': [{'name':k,'quantity':v} for k,v in unmet.items()],'sdgs':[{'name':k,'projects':v} for k,v in sdgs.items()],'demo_mode':DEMO,'contains_demo_data':any(p.is_demo for p in ps)}
+    causes={}
+    for p in ps: causes[cause_name(p.cause_id)]=causes.get(cause_name(p.cause_id),0)+1
+    recommendations=db.scalar(select(func.count()).select_from(Recommendation).join(Requirement,Recommendation.requirement_id==Requirement.id).join(Project,Requirement.project_id==Project.id).join(Offer,Recommendation.offer_id==Offer.id).where(Project.organizer_id.in_(listed),Offer.organization_id.in_(listed)))
+    return {'organizations':len(listed),'active_projects':sum(p.status=='active' for p in ps),'completed_projects':sum(p.status=='completed' for p in ps),'suggested_partnerships':recommendations,'accepted_partnerships':sum(p['status']=='accepted' for p in links),'pending_requests':sum(p['status']=='pending' for p in links),'funding_committed':total('Funding','confirmed_quantity'),'funding_delivered':total('Funding','delivered_quantity'),'volunteers_committed':total('Volunteers','confirmed_quantity'),'volunteers_deployed':total('Volunteers','delivered_quantity'),'verified_beneficiaries':sum(p.verified_beneficiaries for p in ps),'unmet': [{'name':k,'quantity':v} for k,v in unmet.items()],'causes':[{'name':k,'projects':v} for k,v in causes.items()],'demo_mode':DEMO,'contains_demo_data':any(p.is_demo for p in ps)}
 
 @app.get('/admin/verifications',response_model=list[OrgOut])
 def verifications(user=Depends(current),db=Depends(get_db)):
     admin(user); return list(db.scalars(select(Organization).order_by(Organization.id)))
+
+@app.get('/super-admin/applications')
+def listing_applications(user=Depends(current),db=Depends(get_db)):
+    super_admin(user)
+    organizations=list(db.scalars(select(Organization).where(Organization.organization_type.in_(['ngo','company'])).order_by(Organization.created_at.desc(),Organization.id.desc())))
+    result=[]
+    for org in organizations:
+        applicant=db.scalar(select(User).where(User.organization_id==org.id).order_by(User.id))
+        reviews=list(db.scalars(select(ListingReview).where(ListingReview.organization_id==org.id).order_by(ListingReview.id.desc())))
+        result.append({**OrgOut.model_validate(org).model_dump(), 'applicant_name':applicant.name if applicant else '', 'applicant_email':applicant.email if applicant else '', 'created_at':org.created_at, 'reviews':[{'id':r.id,'previous_status':r.previous_status,'status':r.status,'note':r.note,'reviewed_at':r.reviewed_at,'reviewer':db.get(User,r.reviewer_id).name} for r in reviews]})
+    return result
+
+@app.post('/super-admin/organizations/{id}/listing',response_model=OrgOut)
+def review_listing(id:int,data:ListingReviewIn,user=Depends(current),db=Depends(get_db)):
+    super_admin(user);write_lock(db)
+    org=record(db,Organization,id)
+    if org.organization_type not in ('ngo','company'): fail(409,'Only NGO and CSR applications require listing review.')
+    if org.listing_status==data.status: fail(409,'This decision is already recorded. Refresh the application.')
+    db.add(ListingReview(organization_id=id,reviewer_id=user.id,previous_status=org.listing_status,status=data.status,note=data.note))
+    org.listing_status=data.status;org.listing_note=data.note
+    db.commit();return org
 
 @app.post('/admin/organizations/{id}/verification',response_model=OrgOut)
 def verify(id:int,data:VerifyIn,user=Depends(current),db=Depends(get_db)):

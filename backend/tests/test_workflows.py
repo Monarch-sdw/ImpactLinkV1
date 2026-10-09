@@ -19,8 +19,8 @@ def setup(tmp_path):
         with Session() as db: yield db
     app.dependency_overrides[get_db]=db_override
     with Session() as db:
-        for i,role in enumerate(['ngo','contributor','contributor','ngo','admin'],1):
-            org=Organization(id=i,name=f'Demo org {i}',organization_type='ngo' if role=='ngo' else 'company',location='Hyderabad',latitude=17.385,longitude=78.486,supported_sdgs=[4],verification_status='verified',is_demo=True)
+        for i,role in enumerate(['ngo','contributor','contributor','ngo','admin','super_admin'],1):
+            org=Organization(id=i,name=f'Demo org {i}',organization_type='ngo' if role=='ngo' else 'company',location='Hyderabad',latitude=17.385,longitude=78.486,supported_causes=[4],verification_status='verified',listing_status='approved',is_demo=True)
             db.add(org);db.flush();db.add(User(id=i,name=role,email=f'user{i}@example.com',password_hash='unused',role=role,organization_id=i))
         db.commit()
     def client(id=1):
@@ -30,7 +30,7 @@ def setup(tmp_path):
 
 def project_payload(quantity=20,kind='Volunteers',unit='people',spec=None):
     start=str(date.today()+timedelta(days=5));end=str(date.today()+timedelta(days=30))
-    return dict(title='A meaningful project',description='A community education programme with measured resource needs.',location='Hyderabad',latitude=17.385,longitude=78.486,sdg=4,urgency='High',start_date=start,end_date=end,expected_beneficiaries=100,requirements=[dict(resource_type=kind,quantity=quantity,unit=unit,specifications=spec or [],required_start=start,required_end=end)])
+    return dict(title='A meaningful project',description='A community education programme with measured resource needs.',location='Hyderabad',latitude=17.385,longitude=78.486,cause_id=4,urgency='High',start_date=start,end_date=end,expected_beneficiaries=100,requirements=[dict(resource_type=kind,quantity=quantity,unit=unit,specifications=spec or [],required_start=start,required_end=end)])
 
 def offer_payload(quantity=15,kind='Volunteers',unit='people',spec=None):
     return dict(resource_type=kind,total_capacity=quantity,unit=unit,specifications=spec or [],available_start=str(date.today()),available_end=str(date.today()+timedelta(days=60)),location='Hyderabad',latitude=17.385,longitude=78.486,service_radius=50,remote=False)
@@ -62,6 +62,26 @@ def test_creation_matching_partial_and_multi_partner(setup):
     assert full['shortage']==0
     assert sum(a['quantity'] for a in full['allocations'])==20
     assert [a['quantity'] for a in full['allocations']]==[15,5]
+
+
+def test_named_causes_across_filtering_matching_and_dashboard(setup):
+    client,Session=setup
+    ngo,con,p,offer=make(client)
+    assert p['cause_id']==4
+    assert ngo.get('/auth/me').json()['organization']['supported_causes']==[4]
+    assert [row['id'] for row in ngo.get('/projects?cause_id=4').json()]==[p['id']]
+    assert ngo.get('/projects?cause_id=3').json()==[]
+    matches=ngo.get(f"/requirements/{p['requirements'][0]['id']}/matches").json()
+    assert matches[0]['reasons'][0]=='Supports Education projects.'
+    assert ngo.get('/dashboard').json()['causes']==[{'name':'Education','projects':1}]
+    # The renamed application fields continue reading the original stored records.
+    with Session() as db:
+        db.expire_all()
+        assert db.get(Project,p['id']).cause_id==4
+        assert db.get(Organization,2).supported_causes==[4]
+    invalid=project_payload();invalid['cause_id']=18
+    assert ngo.post('/projects',json=invalid).status_code==422
+    assert 'sdg' not in ngo.get('/openapi.json').text.lower()
 
 def test_accept_delivery_and_dashboard(setup):
     client,_=setup;ngo,con,p,o=make(client,20,20)

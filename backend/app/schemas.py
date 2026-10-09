@@ -21,16 +21,18 @@ class OrgIn(Location):
     organization_type: Literal['ngo', 'company', 'college', 'supplier']
     description: str = Field(default='', max_length=5000)
     contact: str = Field(default='', max_length=200)
-    supported_sdgs: list[int] = Field(default_factory=list, max_length=17)
-    @field_validator('supported_sdgs')
+    supported_causes: list[int] = Field(default_factory=list, max_length=17)
+    @field_validator('supported_causes')
     @classmethod
-    def sdgs(cls, v):
-        if any(n < 1 or n > 17 for n in v): raise ValueError('SDGs must be 1–17.')
+    def causes(cls, v):
+        if any(n < 1 or n > 17 for n in v): raise ValueError('Choose a valid cause from the available categories.')
         return sorted(set(v))
 
 class OrgOut(OrgIn):
     id: int
     verification_status: str
+    listing_status: str
+    listing_note: str
     is_demo: bool
 
 class Register(Schema):
@@ -71,7 +73,7 @@ class RequirementIn(ResourceBase):
 class ProjectIn(Location):
     title: str = Field(min_length=3, max_length=200)
     description: str = Field(min_length=10, max_length=10000)
-    sdg: int = Field(ge=1, le=17)
+    cause_id: int = Field(ge=1, le=17)
     urgency: Literal['Low', 'Medium', 'High', 'Critical'] = 'Medium'
     start_date: date
     end_date: date
@@ -122,6 +124,10 @@ class DeliveryIn(Schema):
 class VerifyIn(Schema):
     status: Literal['verified', 'rejected', 'pending']
 
+class ListingReviewIn(Schema):
+    status: Literal['approved', 'rejected']
+    note: str = Field(min_length=3, max_length=2000)
+
 class UserOut(Schema):
     id: int
     name: str
@@ -140,9 +146,10 @@ class ProjectOut(Location):
     id: int
     organizer_id: int
     organization_name: str
+    listing_status: str
     title: str
     description: str
-    sdg: int
+    cause_id: int
     urgency: str
     start_date: date
     end_date: date
