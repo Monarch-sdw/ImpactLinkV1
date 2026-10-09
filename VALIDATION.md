@@ -4,7 +4,7 @@ Tested in the dimpact/ImpactLink/mvp repository. Local app: http://localhost:301
 
 | Check | Result |
 | --- | --- |
-| Backend pytest | 25 passed |
+| Backend pytest | 35 passed after deployment configuration patch |
 | Next.js production build | Passed, Next.js 15.5.27 |
 | Standalone TypeScript check | Passed |
 | Chrome Playwright | 8 passed |
@@ -36,3 +36,7 @@ Release branch: v2. Repository: Monarch-sdw/ImpactLinkV1. This release was prepa
 Vercel configuration was checked against current official Services/FastAPI documentation and the live schema's Services support. [DEPLOYMENT.md](DEPLOYMENT.md) documents persistent PostgreSQL, build-time migrations/seeding, and required environment variables.
 
 A real PostgreSQL database, Docker runtime, and live Vercel deployment were not exercised. Browser checks used Chrome. Starlette/AnyIO emits one test-only deprecation warning.
+
+## Deployment configuration patch
+
+The bootstrap exit was reproduced with VERCEL enabled and no database URL. The hosted error supplied only the final command exit, so its exact underlying exception could not be confirmed. Runtime and migration configuration now recognize provider-injected PostgreSQL variables, ignore blank values, and avoid local dotenv files on Vercel. A build entrypoint reports configuration errors before importing the database and applies a connection timeout. Tests cover URL precedence, direct migration connections, missing settings, invalid hosted SQLite, and a complete migration/demo setup through the build entrypoint. All 35 backend tests passed. UI files were unchanged in this patch; prior browser/build results above remain the latest UI validation.

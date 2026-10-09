@@ -1,12 +1,12 @@
 """Repeatable deploy setup: migrate first, then add missing fictional demo data."""
 from pathlib import Path
-import os
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import text, create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
-from .db import engine, normalize_url
+from .db import engine, URL
+from .config import migration_url
 from .seed import seed
 
 def bootstrap():
@@ -14,8 +14,8 @@ def bootstrap():
     config=Config(str(root/'alembic.ini'))
     config.set_main_option('script_location',str(root/'migrations'))
     # Session advisory locks need a direct connection, not a transaction pooler.
-    direct_url=os.getenv('DATABASE_DIRECT_URL')
-    migration_engine=create_engine(normalize_url(direct_url),poolclass=NullPool) if direct_url else engine
+    direct_url=migration_url()
+    migration_engine=create_engine(direct_url,poolclass=NullPool,connect_args={'prepare_threshold':None,'connect_timeout':15} if direct_url.startswith('postgresql') else {}) if direct_url!=URL else engine
     with migration_engine.connect() as connection:
         postgres=connection.dialect.name=='postgresql'
         if postgres:

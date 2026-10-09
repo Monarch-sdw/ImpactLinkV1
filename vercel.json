@@ -5,7 +5,7 @@
       "root": "backend",
       "framework": "fastapi",
       "entrypoint": "app.main:app",
-      "buildCommand": "python -m app.bootstrap"
+      "buildCommand": "python build.py"
     },
     "frontend": {
       "root": "frontend",

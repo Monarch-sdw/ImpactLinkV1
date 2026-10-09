@@ -12,8 +12,8 @@ The configuration follows Vercel's current [Services configuration](https://verc
 
 | Variable | Value |
 | --- | --- |
-| `DATABASE_URL` | PostgreSQL connection URL including the provider's SSL parameters. `postgres://`, `postgresql://`, and `postgresql+psycopg://` are supported. |
-| `DATABASE_DIRECT_URL` | Direct PostgreSQL URL for migrations when `DATABASE_URL` is a transaction-pooler URL. Omit if `DATABASE_URL` already uses a direct connection. |
+| `DATABASE_URL` | PostgreSQL connection URL including the provider's SSL parameters. `POSTGRES_URL` is also recognized automatically. `postgres://`, `postgresql://`, and `postgresql+psycopg://` are supported. |
+| `DATABASE_DIRECT_URL` | Direct PostgreSQL URL for migrations when the runtime URL is a transaction-pooler URL. `DATABASE_URL_UNPOOLED` and `POSTGRES_URL_NON_POOLING` are also recognized. Omit if the runtime URL already uses a direct connection. |
 | `JWT_SECRET` | A stable random secret of at least 32 characters. |
 | `DEMO_MODE` | `true` to enable fictional accounts, sample data, and one-click super-admin login. |
 | `COOKIE_SECURE` | `true` for HTTPS. This is also the Vercel default. |
@@ -23,7 +23,17 @@ The frontend needs no public database URL or secret. Leave `API_URL` unset on Ve
 
 ## What happens during a build
 
-The backend service runs `python -m app.bootstrap` after installing dependencies. It upgrades Alembic to the latest revision, then adds demo records when `DEMO_MODE=true`. A direct PostgreSQL connection and advisory lock serialize simultaneous deployment setup. Runtime requests do not run migrations or seed data.
+The backend service runs `python build.py` after installing dependencies. It checks the hosted database and signing-secret settings before importing the database code, then runs the bootstrap routine. It upgrades Alembic to the latest revision and adds demo records when `DEMO_MODE=true`. A direct PostgreSQL connection and advisory lock serialize simultaneous deployment setup. Runtime requests do not run migrations or seed data.
+
+## Fixing a failed bootstrap build
+
+`Command "python -m app.bootstrap" exited with 1` is the old build's final summary, not its underlying Python error. Redeploy the latest `v2` commit, which uses `python build.py` and prints an explicit configuration diagnosis. Remove any old Build Command override in Vercel Project Settings so the service commands in `vercel.json` apply.
+
+In Vercel, connect a PostgreSQL database through Storage, or add its connection URL as `DATABASE_URL` or `POSTGRES_URL` under Settings > Environment Variables. Also add `JWT_SECRET` (at least 32 random characters) and `DEMO_MODE=true`. Assign the variables to the deployment's actual environment: Production and/or Preview. Saving environment variables requires a new deployment before they apply.
+
+The runtime prefers `DATABASE_URL`, then `POSTGRES_URL`, then an available direct URL. Migrations prefer `DATABASE_DIRECT_URL`, `DATABASE_URL_UNPOOLED`, or `POSTGRES_URL_NON_POOLING`. Blank variables are ignored, and hosted deployments do not load a local `.env` file. Database connections have a 15-second connection timeout.
+
+The build deliberately remains unsuccessful when required settings are absent or database setup fails; it never substitutes temporary storage or publishes an app whose account data cannot persist. No hosted database credentials are included in Git. See Vercel's [environment configuration guide](https://vercel.com/docs/environment-variables/manage-across-environments).
 
 On an empty database the seed creates 93 fictional organizations, 31 projects, 15 offers, 100 sample volunteer profiles, and demo users for all offer owners. The two new applicant organizations stay pending; their project and offer are private until approval. Existing approved fictional examples remain available for matching.
 
